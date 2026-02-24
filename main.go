@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -232,6 +233,8 @@ func main() {
 		addProfile(dir)
 	case "list":
 		listProfiles(dir, false)
+	case "ls":
+		listProfiles(dir, false)
 	case "delete":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: sshmanager delete <name>")
@@ -250,6 +253,12 @@ func main() {
 		authGoogle()
 	case "sync":
 		syncDrive(settings.AutoSync)
+	case "edit":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: sshmanager edit <name>")
+			os.Exit(1)
+		}
+		editProfile(dir, os.Args[2])
 	default:
 		fmt.Println("Unknown command")
 		os.Exit(1)
@@ -380,6 +389,101 @@ func deleteProfile(dir string, name string) {
 
 }
 
+func editProfile(dir string, name string) {
+	s, err := loadProfiles(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var profileIndex int = -1
+	for i, p := range s.Profiles {
+		if p.Name == name {
+			profileIndex = i
+			break
+		}
+	}
+	if profileIndex == -1 {
+		fmt.Println("Profile not found.")
+		return
+	}
+
+	fmt.Println("Editing SSH profile. Leave fields blank to keep current values.")
+
+	scanner := bufio.NewScanner(os.Stdin)
+
+	fmt.Printf("New name (current: %s): ", s.Profiles[profileIndex].Name)
+	scanner.Scan()
+	newName := strings.TrimSpace(scanner.Text())
+	if newName != "" {
+		s.Profiles[profileIndex].Name = newName
+	}
+
+	fmt.Printf("Host (current: %s): ", s.Profiles[profileIndex].Host)
+	scanner.Scan()
+	host := strings.TrimSpace(scanner.Text())
+	if host != "" {
+		s.Profiles[profileIndex].Host = host
+	}
+
+	fmt.Printf("Port (current: %d, default 22): ", s.Profiles[profileIndex].Port)
+	scanner.Scan()
+	portStr := strings.TrimSpace(scanner.Text())
+	if portStr != "" {
+		newPort, err := strconv.Atoi(portStr)
+		if err == nil {
+			s.Profiles[profileIndex].Port = newPort
+		} else {
+			fmt.Println("Invalid port, keeping current.")
+		}
+	}
+
+	fmt.Printf("Username (current: %s): ", s.Profiles[profileIndex].Username)
+	scanner.Scan()
+	username := strings.TrimSpace(scanner.Text())
+	if username != "" {
+		s.Profiles[profileIndex].Username = username
+	}
+
+	fmt.Print("Password (leave blank to keep current): ")
+	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		log.Fatal(err)
+	}
+	password := strings.TrimSpace(string(passwordBytes))
+	fmt.Println()
+	if password != "" {
+		s.Profiles[profileIndex].Password = password
+	}
+
+	fmt.Printf("Private key file path (leave blank to keep current): ")
+	scanner.Scan()
+	keyPath := strings.TrimSpace(scanner.Text())
+
+	if keyPath != "" {
+		keyBytes, err := os.ReadFile(keyPath)
+		if err != nil {
+			log.Fatalf("Failed to read key file: %v", err)
+		}
+		stat, err := os.Stat(keyPath)
+		if err == nil && stat.Mode().Perm()&0007 != 0 {
+			fmt.Printf("Warning: Key file '%s' is readable by others (permissions: %s). Consider securing it with 'chmod 600 %s'.\n", keyPath, stat.Mode(), keyPath)
+		}
+		s.Profiles[profileIndex].PrivateKeyContent = base64.StdEncoding.EncodeToString(keyBytes)
+	}
+
+	if err := saveProfiles(dir, s); err != nil {
+		log.Fatal(err)
+	}
+
+	settings, err := loadSettings()
+	if err != nil {
+		log.Fatal(err)
+	}
+	syncDrive(settings.AutoSync)
+
+	fmt.Println("Profile edited successfully.")
+}
+
 func connectProfile(dir string, name string) {
 	s, err := loadProfiles(dir)
 	if err != nil {
@@ -438,6 +542,7 @@ func connectProfile(dir string, name string) {
 			"-o", "ServerAliveInterval=60",
 			"-o", "ServerAliveCountMax=10",
 			"-o", "TCPKeepAlive=yes",
+			"-o", "PubkeyAuthentication=no",
 			fmt.Sprintf("%s@%s", profile.Username, profile.Host))
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
