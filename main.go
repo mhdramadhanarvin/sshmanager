@@ -598,9 +598,17 @@ func saveSettings(settings *AppSettings) error {
 
 func getDriveClient() (*drive.Service, error) {
 	ctx := context.Background()
+
+	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+
+	if clientID == "" || clientSecret == "" {
+		return nil, fmt.Errorf("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required")
+	}
+
 	config := &oauth2.Config{
-		ClientID:     "<client_id>",
-		ClientSecret: "<cllient_secret>",
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 		Scopes:       []string{drive.DriveFileScope},
 		Endpoint:     google.Endpoint,
 		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob",
